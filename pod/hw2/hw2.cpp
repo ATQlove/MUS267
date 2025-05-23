@@ -5,12 +5,10 @@
 using namespace daisy;
 using namespace daisysp;
 
-// Audio processing constants
-static const int DELAY_BUFFER_SIZE = 48000;  // 1 second at 48kHz sample rate
+static const int DELAY_BUFFER_SIZE = 48000;
 static const float PI = 3.14159265359f;
 static const float TWO_PI = 2.0f * PI;
 
-// Audio processing class for modulated delay effect
 class ModulatedDelay {
 private:
     // Delay line buffer and parameters
@@ -78,7 +76,6 @@ public:
         lfo_depth_ = daisysp::fmax(0.0f, daisysp::fmin(0.8f, depth));  // 0% to 80% modulation
     }
     
-    // Process audio sample with modulated delay
     float Process(float input) {
         // Apply gentle high-pass filter to input to remove DC offset
         input_filter_state_ += 0.001f * (input - input_filter_state_);
@@ -119,11 +116,9 @@ public:
     }
 };
 
-// Global objects
 DaisyPod hw;
 ModulatedDelay delay_processor;
 
-// Control variables
 float delay_time_s = 0.1f;
 float feedback_amount = 0.3f;
 float wet_dry_mix = 0.5f;
@@ -131,7 +126,6 @@ float lfo_rate_hz = 0.5f;
 float lfo_depth = 0.2f;
 
 void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size) {
-    // Process audio samples
     for(size_t i = 0; i < size; i++) {
         // Get mono input (average L+R if stereo input)
         float input_sample = (in[0][i] + in[1][i]) * 0.5f;
@@ -142,19 +136,16 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         // Apply soft limiting to prevent clipping
         output_sample = tanhf(output_sample * 0.8f);
         
-        // Output to both channels
         out[0][i] = output_sample;
         out[1][i] = output_sample;
     }
 }
 
 int main(void) {
-    // Initialize the Daisy Pod
     hw.Init();
-    hw.SetAudioBlockSize(48); // 48 samples = 1ms at 48kHz
+    hw.SetAudioBlockSize(48);
     float sample_rate = hw.AudioSampleRate();
     
-    // Initialize delay processor
     delay_processor.Init(sample_rate);
     
     // Initialize LED to indicate system status
@@ -170,7 +161,6 @@ int main(void) {
     uint32_t last_control_time = System::GetNow();
     bool led_state = false;
     
-    // Main loop - handle controls and LED
     while(1) {
         uint32_t now = System::GetNow();
         
@@ -197,25 +187,40 @@ int main(void) {
             }
             
             // Button 1: LFO Rate (slow/fast when pressed)
-            lfo_rate_hz = hw.button1.Pressed() ? 3.0f : 0.5f;
+            lfo_rate_hz = hw.button1.Pressed() ? 16.0f : 0.2f;  // Fast 16Hz vs slow 0.2Hz
             delay_processor.SetLFOFrequency(lfo_rate_hz);
             
-            // Button 2: LFO Depth (50% when pressed, 10% when released)
-            lfo_depth = hw.button2.Pressed() ? 0.5f : 0.1f;
+            // Button 2: LFO Depth (heavy/light when pressed)
+            lfo_depth = hw.button2.Pressed() ? 0.8f : 0.05f;  // Heavy 80% vs light 5%
             delay_processor.SetLFODepth(lfo_depth);
             
             last_control_time = now;
         }
         
-        // Blink LED every 500ms to show system is running
-        if(now - last_led_blink_time > 500) {
+        // LED status indication: show button states and system running status
+        if(now - last_led_blink_time > 500) {  // Breathing frequency
             last_led_blink_time = now;
-            led_state = !led_state;
             
-            if(led_state) {
-                hw.led1.Set(0.0f, 1.0f, 0.0f); // Green
+            // Check button states
+            bool button1_pressed = hw.button1.Pressed();
+            bool button2_pressed = hw.button2.Pressed();
+            
+            if(button1_pressed | button2_pressed) {
+                if(button1_pressed){
+                    // Button 1 pressed: LED1 shows solid blue (indicates fast LFO)
+                    hw.led1.Set(0.0f, 0.0f, 1.0f); // Pure blue
+                }
+                
+                if(button2_pressed) {
+                    // Button 2 pressed: LED2 shows solid blue (indicates deep modulation)
+                    hw.led2.Set(0.0f, 0.0f, 1.0f); // LED2 blue
+                }
             } else {
-                hw.led1.Set(0.0f, 0.3f, 0.3f); // Dim cyan
+                // No buttons pressed: breathing green flash
+                led_state = !led_state;
+                float brightness = led_state ? 1.0f : 0.2f;
+                hw.led1.Set(0.0f, brightness, 0.0f); // LED1 green breathing
+                hw.led2.Set(0.0f, brightness, 0.0f); // LED2 green breathing
             }
             hw.UpdateLeds();
         }
