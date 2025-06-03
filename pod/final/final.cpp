@@ -49,6 +49,16 @@ static bool          lastEncoderButton     = false;
 constexpr int NUM_DRUM_SETS = 6;
 static int   currentDrumSet = 0;
 
+// LED colors for each drum set (R, G, B)
+static const uint8_t drumSetColors[NUM_DRUM_SETS][3] = {
+    {255, 0, 0},    // Set 0: Red (Classic)
+    {0, 255, 0},    // Set 1: Green (Electronic)
+    {0, 0, 255},    // Set 2: Blue (808 Style)
+    {255, 255, 0},  // Set 3: Yellow (Rock Kit)
+    {255, 0, 255},  // Set 4: Magenta (Lo-Fi HipHop)
+    {0, 255, 255}   // Set 5: Cyan (Industrial)
+};
+
 // Predefined parameters for each drum set:
 //   [set][0] = kick frequency (Hz)
 //   [set][1] = kick decay time (sec)
@@ -125,6 +135,12 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
             kickEnv.SetDecayTime( drumParams[currentDrumSet][1] );
             snareFilter.SetFreq( drumParams[currentDrumSet][2] );
             snareEnv.SetDecayTime( drumParams[currentDrumSet][3] );
+            
+            // Update LED color for the current drum set
+            pod.led1.Set(drumSetColors[currentDrumSet][0] / 255.0f,
+                        drumSetColors[currentDrumSet][1] / 255.0f,
+                        drumSetColors[currentDrumSet][2] / 255.0f);
+            pod.led1.Update();
         }
 
         // 4) Kick & Snare button edge detection
@@ -140,7 +156,7 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         lastButtonSnare = thisButtonSnare;
 
         // 5) Generate kick sample
-        float k = kickOsc.Process() * kickEnv.Process(false) * 2.0f;
+        float k = kickOsc.Process() * kickEnv.Process(false) * 2.5f;
 
         // 6) Generate snare sample
         float noise    = snareNoise.Process();
@@ -160,6 +176,11 @@ int main(void)
     pod.Init();
     sampleRate = pod.AudioSampleRate();
 
+    // Set initial LED color for the first drum set
+    pod.led1.Set(drumSetColors[0][0] / 255.0f,
+                 drumSetColors[0][1] / 255.0f,
+                 drumSetColors[0][2] / 255.0f);
+    pod.led1.Update();
 
     // --- Initialize encoder state, but no additional setup needed for rotation here ---
     lastEncoderButton = pod.encoder.Pressed();
