@@ -45,8 +45,8 @@ static bool          lastButtonKick        = false;
 static bool          lastButtonSnare       = false;
 static bool          lastEncoderButton     = false;
 
-// Drum-set parameters (example for 2 sets)
-constexpr int NUM_DRUM_SETS = 2;
+// Drum-set parameters
+constexpr int NUM_DRUM_SETS = 6;
 static int   currentDrumSet = 0;
 
 // Predefined parameters for each drum set:
@@ -57,8 +57,27 @@ static int   currentDrumSet = 0;
 static const float drumParams[NUM_DRUM_SETS][4] = {
     // Set 0: "Classic" drum set
     {  60.0f, 0.20f, 1800.0f, 0.15f },
+
     // Set 1: "Electronic" drum set
-    {  80.0f, 0.12f, 1200.0f, 0.10f }
+    {  80.0f, 0.12f, 1200.0f, 0.10f },
+
+    // Set 2: "808 Style" (inspired by TR-808)
+    // Characteristics: Deep and powerful kick with longer decay; crisp snare with shorter decay
+    {  45.0f, 0.80f, 2200.0f, 0.10f },
+
+    // Set 3: "Rock Kit" (more punchy and acoustic)
+    // Characteristics: Solid kick; bright and punchy snare
+    {  55.0f, 0.28f, 2500.0f, 0.18f },
+
+    // Set 4: "Lo-Fi HipHop" (soft, slightly retro)
+    // Characteristics: Kick with slightly higher frequency and short decay; 
+    // Snare with lower frequency for a "warmer" or "muffled" sound
+    {  70.0f, 0.15f, 1000.0f, 0.09f },
+
+    // Set 5: "Industrial" (hard, aggressive)
+    // Characteristics: Very short and powerful kick; 
+    // High-frequency snare with harsh noise characteristics
+    {  65.0f, 0.10f, 3500.0f, 0.12f }
 };
 
 // Map a normalized knob [0,1] to BPM in [60,180]
