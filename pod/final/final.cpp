@@ -1,11 +1,17 @@
-// Drum Machine
-// Knob 1 → Tempo (BPM 60–180)
-// Knob 2 → Master Volume (0.0–1.0)
-// Button 1 → Kick drum
-// Button 2 → Snare drum
+// Drum Machine for Daisy Pod with Drum-Set Switching via Big Encoder
 //
-// Build and flash this to your Daisy Pod. Make sure you have daisy_pod and daisysp
-// in your include path (as provided by the Daisy examples setup).
+// Knob 1  → Tempo (BPM 60–180)
+// Knob 2  → Master Volume (0.0–1.0)
+// Button 1→ Kick drum (current drum set's kick)
+// Button 2→ Snare drum (current drum set's snare)
+// Encoder (big knob) rotation & push → Switch between drum sets
+//
+// This example assumes the DaisyPod API exposes:
+//   KNOB_0, KNOB_1, KNOB_LAST   (where KNOB_LAST is the big encoder's index)
+//   BUTTON_0, BUTTON_1, BUTTON_LAST (BUTTON_LAST is the encoder-push button)
+//
+// Each time you press the encoder (BUTTON_LAST), it steps to the next drum set.
+// You can define as many drum sets as you like; here we show two sets for illustration.
 
 #include "daisy_pod.h"
 #include "daisysp.h"
@@ -34,73 +40,98 @@ static Adsr         clickEnv;
 static float         beatIntervalSamples = 0.0f;
 static float         beatCounter         = 0.0f;
 
-// Helpers to track button rising edges
-static bool          lastButtonStateKick  = false;
-static bool          lastButtonStateSnare = false;
+// Track button/encoder states for edge detection
+static bool          lastButtonKick        = false;
+static bool          lastButtonSnare       = false;
+static bool          lastEncoderButton     = false;
+
+// Drum-set parameters (example for 2 sets)
+constexpr int NUM_DRUM_SETS = 2;
+static int   currentDrumSet = 0;
+
+// Predefined parameters for each drum set:
+//   [set][0] = kick frequency (Hz)
+//   [set][1] = kick decay time (sec)
+//   [set][2] = snare filter center-freq (Hz)
+//   [set][3] = snare decay time (sec)
+static const float drumParams[NUM_DRUM_SETS][4] = {
+    // Set 0: "Classic" drum set
+    {  60.0f, 0.20f, 1800.0f, 0.15f },
+    // Set 1: "Electronic" drum set
+    {  80.0f, 0.12f, 1200.0f, 0.10f }
+};
 
 // Map a normalized knob [0,1] to BPM in [60,180]
-static inline float  KnobToBPM(float k) { return 60.0f + (180.0f - 60.0f) * k; }
+static inline float KnobToBPM(float k) { return 60.0f + (180.0f - 60.0f) * k; }
 // Map a normalized knob [0,1] to volume [0, 1]
-static inline float  KnobToVolume(float k) { return k; }
+static inline float KnobToVolume(float k) { return k; }
 
 void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)
 {
-    // Each callback: we process 'size' frames, stereo output
     for (size_t i = 0; i < size; i++)
     {
-        // 1) Process control inputs at audio rate
-        pod.ProcessAnalogControls();  // updates pod.GetKnobValue()
-        pod.ProcessDigitalControls(); // updates pod.GetButton()
+        // 1) Read all control inputs each sample
+        pod.ProcessAnalogControls();   // updates pod.GetKnobValue()
+        pod.ProcessDigitalControls();  // updates pod.GetButton()
 
-        // Read knobs (normalized 0.0 – 1.0)
-        float tempoKnob   = pod.GetKnobValue(DaisyPod::KNOB_1);  // Pot 1 → Tempo
-        float volumeKnob  = pod.GetKnobValue(DaisyPod::KNOB_2);  // Pot 2 → Volume
+        // Read tempo & volume knobs
+        float tempoKnob  = pod.GetKnobValue(DaisyPod::KNOB_1);   // Pot 1 → Tempo
+        float volumeKnob = pod.GetKnobValue(DaisyPod::KNOB_2);   // Pot 2 → Volume
 
-        // Convert to BPM & volume
-        float bpm     = KnobToBPM(tempoKnob);
-        float volume  = KnobToVolume(volumeKnob);
+        // Convert to BPM & master volume
+        float bpm    = KnobToBPM(tempoKnob);
+        float volume = KnobToVolume(volumeKnob);
 
         // Update beat interval (samples per beat)
         beatIntervalSamples = sampleRate * (60.0f / bpm);
 
-        // 2) Check metronome beat
+        // 2) Metronome: trigger click on each beat
         float clkSample = 0.0f;
         beatCounter += 1.0f;
         if (beatCounter >= beatIntervalSamples)
         {
             beatCounter -= beatIntervalSamples;
-            clickEnv.Retrigger(false);  // fire a click
+            clickEnv.Retrigger(false);
         }
-        // Process click oscillator + envelope
         clkSample = clickOsc.Process() * clickEnv.Process(false);
 
-        // 3) Check button presses (rising edge detection)
-        bool thisButtonKick  = pod.button1.Pressed(); // Button 1 triggers kick
-        bool thisButtonSnare = pod.button2.Pressed(); // Button 2 triggers snare
+        // 3) Drum-set switching via encoder button (BUTTON_LAST)
+        bool thisEncoderButton = pod.encoder.Pressed();
+        if (thisEncoderButton && !lastEncoderButton)
+        {
+            // On rising edge of encoder push: advance to next set
+            currentDrumSet = (currentDrumSet + 1) % NUM_DRUM_SETS;
+            // Apply new parameters immediately:
+            kickOsc.SetFreq(     drumParams[currentDrumSet][0] );
+            kickEnv.SetDecayTime( drumParams[currentDrumSet][1] );
+            snareFilter.SetFreq( drumParams[currentDrumSet][2] );
+            snareEnv.SetDecayTime( drumParams[currentDrumSet][3] );
+        }
+        lastEncoderButton = thisEncoderButton;
 
-        // Kick button rising edge
-        if (thisButtonKick && !lastButtonStateKick)
+        // 4) Kick & Snare button edge detection
+        bool thisButtonKick  = pod.button1.Pressed(); // Kick button
+        bool thisButtonSnare = pod.button2.Pressed(); // Snare button
+
+        if (thisButtonKick && !lastButtonKick)
             kickEnv.Retrigger(false);
-        lastButtonStateKick = thisButtonKick;
+        lastButtonKick = thisButtonKick;
 
-        // Snare button rising edge
-        if (thisButtonSnare && !lastButtonStateSnare)
+        if (thisButtonSnare && !lastButtonSnare)
             snareEnv.Retrigger(false);
-        lastButtonStateSnare = thisButtonSnare;
+        lastButtonSnare = thisButtonSnare;
 
-        // 4) Generate kick sample
+        // 5) Generate kick sample
         float k = kickOsc.Process() * kickEnv.Process(false);
 
-        // 5) Generate snare sample
-        float n          = snareNoise.Process();
-        snareFilter.Process(n);
-        float filtered   = snareFilter.Band();  // Use bandpass output
-        float s          = filtered * snareEnv.Process(false);
+        // 6) Generate snare sample
+        float noise    = snareNoise.Process();
+        snareFilter.Process(noise);
+        float filtered = snareFilter.Band();  // Use bandpass output
+        float s        = filtered * snareEnv.Process(false);
 
-        // 6) Mix everything and apply master volume
-        float outSample  = (k + s + clkSample) * volume;
-
-        // Write to both left/right
+        // 7) Mix kick + snare + click, apply volume
+        float outSample = (k + s + clkSample) * volume;
         out[0][i] = outSample;
         out[1][i] = outSample;
     }
@@ -108,45 +139,43 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
 
 int main(void)
 {
-    // 1) Initialize hardware
     pod.Init();
     sampleRate = pod.AudioSampleRate();
 
-    // 2) Initialize DSP modules
 
-    // --- Kick drum setup ---
-    // 60 Hz sine, percussive envelope (fast attack, moderate decay)
+    // --- Initialize encoder state, but no additional setup needed for rotation here ---
+    lastEncoderButton = pod.encoder.Pressed();
+
+    // --- Kick drum initial setup (use parameters from set 0) ---
     kickOsc.Init(sampleRate);
     kickOsc.SetWaveform(Oscillator::WAVE_SIN);
-    kickOsc.SetFreq(60.0f);
+    kickOsc.SetFreq(     drumParams[0][0] );
     kickEnv.Init(sampleRate);
-    kickEnv.SetAttackTime(0.001f);   // 1 ms attack
-    kickEnv.SetDecayTime(0.2f);     // 200 ms decay
+    kickEnv.SetAttackTime( 0.001f );   // 1 ms attack
+    kickEnv.SetDecayTime( drumParams[0][1] );
     kickEnv.SetSustainLevel(0.0f);
 
-    // --- Snare drum setup ---
-    snareNoise.Init();  // white noise
+    // --- Snare drum initial setup (use parameters from set 0) ---
+    snareNoise.Init();
     snareEnv.Init(sampleRate);
-    snareEnv.SetAttackTime(0.001f);  // 1 ms attack
-    snareEnv.SetDecayTime(0.15f);   // 150 ms decay
+    snareEnv.SetAttackTime( 0.001f );   // 1 ms attack
+    snareEnv.SetDecayTime( drumParams[0][3] );
     snareEnv.SetSustainLevel(0.0f);
     snareFilter.Init(sampleRate);
-    snareFilter.SetFreq(1800.0f); // center freq ~ 1.8 kHz
-    snareFilter.SetRes(0.7f);     // moderate resonance
+    snareFilter.SetFreq( drumParams[0][2] );
+    snareFilter.SetRes(  0.7f );
 
     // --- Metronome click setup ---
     clickOsc.Init(sampleRate);
     clickOsc.SetWaveform(Oscillator::WAVE_SIN);
-    clickOsc.SetFreq(1000.0f);    // 1 kHz click
+    clickOsc.SetFreq( 1000.0f );    // 1 kHz click
     clickEnv.Init(sampleRate);
-    clickEnv.SetAttackTime(0.0005f); // 0.5 ms attack
-    clickEnv.SetDecayTime(0.01f);   // 10 ms decay
+    clickEnv.SetAttackTime(  0.0005f ); // 0.5 ms attack
+    clickEnv.SetDecayTime(  0.01f );   // 10 ms decay
     clickEnv.SetSustainLevel(0.0f);
 
-    // 3) Start audio callback at 48kHz, stereo, 16 frames per buffer
-    pod.StartAdc();  // enable knob/button reading
+    pod.StartAdc();       // enable knob/button scanning
     pod.StartAudio(AudioCallback);
 
-    // 4) Keep running
-    while (1) { /* Nothing here; audio runs in interrupt */}
+    while (1) { }
 }
