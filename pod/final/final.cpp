@@ -114,19 +114,18 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         }
         clkSample = clickOsc.Process() * clickEnv.Process(false);
 
-        // 3) Drum-set switching via encoder button (BUTTON_LAST)
-        bool thisEncoderButton = pod.encoder.Pressed();
-        if (thisEncoderButton && !lastEncoderButton)
+        // 3) Drum-set switching via encoder rotation
+        int32_t encoderIncrement = pod.encoder.Increment();
+        if (encoderIncrement != 0)
         {
-            // On rising edge of encoder push: advance to next set
-            currentDrumSet = (currentDrumSet + 1) % NUM_DRUM_SETS;
+            // On encoder rotation: advance to next/previous set
+            currentDrumSet = (currentDrumSet + encoderIncrement + NUM_DRUM_SETS) % NUM_DRUM_SETS;
             // Apply new parameters immediately:
             kickOsc.SetFreq(     drumParams[currentDrumSet][0] );
             kickEnv.SetDecayTime( drumParams[currentDrumSet][1] );
             snareFilter.SetFreq( drumParams[currentDrumSet][2] );
             snareEnv.SetDecayTime( drumParams[currentDrumSet][3] );
         }
-        lastEncoderButton = thisEncoderButton;
 
         // 4) Kick & Snare button edge detection
         bool thisButtonKick  = pod.button1.Pressed(); // Kick button
