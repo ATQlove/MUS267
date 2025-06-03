@@ -141,7 +141,7 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         lastButtonSnare = thisButtonSnare;
 
         // 5) Generate kick sample
-        float k = kickOsc.Process() * kickEnv.Process(false);
+        float k = kickOsc.Process() * kickEnv.Process(false) * 2.0f;
 
         // 6) Generate snare sample
         float noise    = snareNoise.Process();
