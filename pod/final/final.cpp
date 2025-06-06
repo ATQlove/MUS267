@@ -36,6 +36,11 @@ static Svf           snareFilter;
 static Oscillator    clickOsc;
 static Adsr         clickEnv;
 
+//Hi-hat// ———— 改为 Hi-Hat：
+static WhiteNoise    hiHatNoise;
+static Adsr          hiHatEnv;
+static Svf           hiHatFilter;
+
 // Timing / state
 static float         beatIntervalSamples = 0.0f;
 static float         beatCounter         = 0.0f;
@@ -119,7 +124,7 @@ static const uint8_t presetSnare[PRESET_STEPS] = {
     0,0,1,1,0,1,1,0,  0,0,1,1,0,1,1,0,  0,0,1,1,0,0,0,1,  0,1,1,0,1,1,0,1
 };
 
-// R 行：Ride/Hi-Hat（这里用 clickOsc 代替）
+// R 行：Ride/Hi-Hat
 static const uint8_t presetClick[PRESET_STEPS] = {
     // bar1            bar2            bar3            bar4
     1,1,1,1,1,1,1,1,  1,1,1,1,1,1,1,1,  1,1,1,1,1,1,1,1,  1,1,1,1,0,1,1,0
@@ -155,6 +160,11 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
             clickEnv.Retrigger(false);
         }
         clkSample = clickOsc.Process() * clickEnv.Process(false);
+
+        // —— 改为：生成 Hi-Hat —— 
+        float noiseSample = hiHatNoise.Process();
+        hiHatFilter.Process(noiseSample);
+        float hHatSample = hiHatFilter.High() * hiHatEnv.Process(false);
 
         // 3) Drum-set switching via encoder rotation
         int32_t encoderIncrement = pod.encoder.Increment();
@@ -231,7 +241,8 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         {
             if (presetBass[presetStep])  kickEnv.Retrigger(false);
             if (presetSnare[presetStep]) snareEnv.Retrigger(false);
-            if (presetClick[presetStep]) clickEnv.Retrigger(false);
+            // if (presetClick[presetStep]) clickEnv.Retrigger(false);
+            if (presetClick[presetStep]) hiHatEnv.Retrigger(false);
 
             // 播完 32 步后退出
             presetStep++;
@@ -258,7 +269,17 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         float s        = filtered * snareEnv.Process(false);
 
         // 7) Mix kick + snare + click, apply volume
-        float outSample = (k + s + clkSample) * volume;
+        float outSample;
+        if (!presetMode)
+        {
+            // 普通模式：使用 metronome
+            outSample = (k + s + clkSample) * volume;
+        }
+        else
+        {
+            // 预设模式：同时使用 metronome 和 hi-hat
+            outSample = (k + s + clkSample + hHatSample) * volume;
+        }
         out[0][i] = outSample;
         out[1][i] = outSample;
     }
@@ -305,6 +326,17 @@ int main(void)
     clickEnv.SetAttackTime(  0.0005f ); // 0.5 ms attack
     clickEnv.SetDecayTime(  0.01f );   // 10 ms decay
     clickEnv.SetSustainLevel(0.0f);
+
+    // --- Hi-Hat initial setup ————
+    hiHatNoise.Init();
+    hiHatEnv.Init(sampleRate);
+    hiHatEnv.SetAttackTime(0.001f);   // 1 ms
+    hiHatEnv.SetDecayTime(0.05f);     // 短衰减
+    hiHatEnv.SetSustainLevel(0.0f);
+    hiHatFilter.Init(sampleRate);
+    // 用高通滤波器保留高频部分
+    hiHatFilter.SetFreq(8000.0f);
+    hiHatFilter.SetRes(0.7f);
 
     pod.StartAdc();       // enable knob/button scanning
     pod.StartAudio(AudioCallback);
