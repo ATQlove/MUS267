@@ -95,6 +95,20 @@ static inline float KnobToBPM(float k) { return 60.0f + (180.0f - 60.0f) * k; }
 // Map a normalized knob [0,1] to volume [0, 1]
 static inline float KnobToVolume(float k) { return k; }
 
+
+// ==================== 全局新增（放在 currentDrumSet 定义之后） ====================
+static bool  presetMode        = false;
+static bool  presetPlaying     = false;
+static int   presetStep        = 0;
+static float subdivCounter     = 0.0f;
+static float subdivIntervalSamples = 0.0f;
+constexpr int PRESET_STEPS     = 8;
+// 预设节奏（8 个 1/8 把位），1 表示触发，0 表示静默
+static const uint8_t presetBass[PRESET_STEPS]  = { 1,0,0,0, 1,0,1,1 };  // B 行
+static const uint8_t presetSnare[PRESET_STEPS] = { 0,0,1,0, 0,0,1,0 };  // S 行
+static const uint8_t presetClick[PRESET_STEPS] = { 1,1,1,1, 1,1,1,1 };  // R 行（用 click 代替）
+
+
 void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)
 {
     for (size_t i = 0; i < size; i++)
@@ -143,17 +157,76 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
             pod.led1.Update();
         }
 
-        // 4) Kick & Snare button edge detection
-        bool thisButtonKick  = pod.button1.Pressed(); // Kick button
-        bool thisButtonSnare = pod.button2.Pressed(); // Snare button
+        // 重新计算 1/8 音符的样本间隔
+        subdivIntervalSamples = beatIntervalSamples * 0.5f;
 
-        if (thisButtonKick && !lastButtonKick)
-            kickEnv.Retrigger(false);
-        lastButtonKick = thisButtonKick;
+        // —— 新：1/8 拆分计时 —— 
+        subdivCounter += 1.0f;
+        bool newSubdivision = false;
+        if (subdivCounter >= subdivIntervalSamples)
+        {
+            subdivCounter -= subdivIntervalSamples;
+            newSubdivision = true;
+        }
 
-        if (thisButtonSnare && !lastButtonSnare)
-            snareEnv.Retrigger(false);
-        lastButtonSnare = thisButtonSnare;
+        // —— 新：检测 Encoder 按下边沿 —— 
+        bool thisEncoderBtn = pod.encoder.Pressed();
+        if (thisEncoderBtn && !lastEncoderButton)
+        {
+            presetMode = !presetMode;  // 切换模式
+            // 可选：用不同颜色提示
+            if (presetMode)
+                pod.led1.Set(1.0f, 1.0f, 1.0f);  // 白灯表示预设
+            else
+                pod.led1.Set( drumSetColors[currentDrumSet][0]/255.0f,
+                              drumSetColors[currentDrumSet][1]/255.0f,
+                              drumSetColors[currentDrumSet][2]/255.0f );
+            pod.led1.Update();
+        }
+        lastEncoderButton = thisEncoderBtn;
+
+        // —— 新：处理预设模式下的按钮 —— 
+        bool thisKickBtn  = pod.button1.Pressed();
+        bool thisSnareBtn = pod.button2.Pressed();
+
+        if (!presetMode)
+        {
+            // 手动模式，保持原有逻辑
+            if (thisKickBtn  && !lastButtonKick)  kickEnv.Retrigger(false);
+            if (thisSnareBtn && !lastButtonSnare) snareEnv.Retrigger(false);
+        }
+        else
+        {
+            // 预设模式：单击 Kick 启动节奏播放
+            if (thisKickBtn && !lastButtonKick && !presetPlaying)
+            {
+                presetPlaying = true;
+                presetStep    = 0;
+                subdivCounter = 0.0f;
+            }
+        }
+        lastButtonKick  = thisKickBtn;
+        lastButtonSnare = thisSnareBtn;
+
+        // —— 新：在预设播放中，每到 1/8 拍触发对应鼓声 —— 
+        if (presetMode && presetPlaying && newSubdivision)
+        {
+            if (presetBass[presetStep])  kickEnv.Retrigger(false);
+            if (presetSnare[presetStep]) snareEnv.Retrigger(false);
+            if (presetClick[presetStep]) clickEnv.Retrigger(false);
+
+            presetStep++;
+            if (presetStep >= PRESET_STEPS)
+            {
+                presetPlaying = false;  // 播放完了退出
+                // 可选：恢复显示当前套鼓颜色
+                pod.led1.Set( drumSetColors[currentDrumSet][0]/255.0f,
+                              drumSetColors[currentDrumSet][1]/255.0f,
+                              drumSetColors[currentDrumSet][2]/255.0f );
+                pod.led1.Update();
+            }
+        }
+
 
         // 5) Generate kick sample
         float k = kickOsc.Process() * kickEnv.Process(false) * 2.5f;
