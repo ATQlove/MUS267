@@ -102,11 +102,29 @@ static bool  presetPlaying     = false;
 static int   presetStep        = 0;
 static float subdivCounter     = 0.0f;
 static float subdivIntervalSamples = 0.0f;
-constexpr int PRESET_STEPS     = 8;
-// 预设节奏（8 个 1/8 把位），1 表示触发，0 表示静默
-static const uint8_t presetBass[PRESET_STEPS]  = { 1,0,0,0, 1,0,1,1 };  // B 行
-static const uint8_t presetSnare[PRESET_STEPS] = { 0,0,1,0, 0,0,1,0 };  // S 行
-static const uint8_t presetClick[PRESET_STEPS] = { 1,1,1,1, 1,1,1,1 };  // R 行（用 click 代替）
+
+// ———— 将 PRESET_STEPS 从 8 改为 32 ————
+constexpr int PRESET_STEPS = 32;
+
+// ———— 四小节共 32 步的预设节奏 ——//
+// B 行：Bass drum （Kick）
+static const uint8_t presetBass[PRESET_STEPS] = {
+    // bar1            bar2            bar3            bar4
+    1,1,0,0,0,0,1,0,  1,1,0,0,0,0,1,0,  1,1,0,0,0,1,0,0,  0,1,0,0,0,1,0,0
+};
+
+// S 行：Snare
+static const uint8_t presetSnare[PRESET_STEPS] = {
+    // bar1            bar2            bar3            bar4
+    0,0,1,1,0,1,1,0,  0,0,1,1,0,1,1,0,  0,0,1,1,0,0,0,1,  0,1,1,0,1,1,0,1
+};
+
+// R 行：Ride/Hi-Hat（这里用 clickOsc 代替）
+static const uint8_t presetClick[PRESET_STEPS] = {
+    // bar1            bar2            bar3            bar4
+    1,1,1,1,1,1,1,1,  1,1,1,1,1,1,1,1,  1,1,1,1,1,1,1,1,  1,1,1,1,0,1,1,0
+};
+
 
 
 void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)
@@ -215,16 +233,18 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
             if (presetSnare[presetStep]) snareEnv.Retrigger(false);
             if (presetClick[presetStep]) clickEnv.Retrigger(false);
 
+            // 播完 32 步后退出
             presetStep++;
-            if (presetStep >= PRESET_STEPS)
+            if(presetStep >= PRESET_STEPS)
             {
-                presetPlaying = false;  // 播放完了退出
-                // 可选：恢复显示当前套鼓颜色
+                presetPlaying = false;
+                // （可选）恢复当前套鼓的 LED
                 pod.led1.Set( drumSetColors[currentDrumSet][0]/255.0f,
-                              drumSetColors[currentDrumSet][1]/255.0f,
-                              drumSetColors[currentDrumSet][2]/255.0f );
+                            drumSetColors[currentDrumSet][1]/255.0f,
+                            drumSetColors[currentDrumSet][2]/255.0f );
                 pod.led1.Update();
             }
+
         }
 
 
