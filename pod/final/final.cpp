@@ -54,6 +54,16 @@ static bool          lastEncoderButton     = false;
 constexpr int NUM_DRUM_SETS = 6;
 static int   currentDrumSet = 0;
 
+static const float hiHatParams[NUM_DRUM_SETS][2] = {
+    // {filterFreqHz, decaySec}
+    {12000.0f, 0.05f},   // Classic
+    {10000.0f, 0.04f},   // Electronic
+    { 8000.0f, 0.06f},   // 808 Style
+    {11000.0f, 0.05f},   // Rock Kit
+    { 9000.0f, 0.07f},   // Lo-Fi HipHop
+    { 7000.0f, 0.03f}    // Industrial
+};
+
 // LED colors for each drum set (R, G, B)
 static const uint8_t drumSetColors[NUM_DRUM_SETS][3] = {
     {255, 0, 0},    // Set 0: Red (Classic)
@@ -177,6 +187,8 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
             kickEnv.SetDecayTime( drumParams[currentDrumSet][1] );
             snareFilter.SetFreq( drumParams[currentDrumSet][2] );
             snareEnv.SetDecayTime( drumParams[currentDrumSet][3] );
+            hiHatFilter.SetFreq( hiHatParams[currentDrumSet][0] );
+            hiHatEnv.SetDecayTime( hiHatParams[currentDrumSet][1] );
             
             // Update LED color for the current drum set
             pod.led1.Set(drumSetColors[currentDrumSet][0] / 255.0f,
