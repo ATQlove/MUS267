@@ -1,18 +1,3 @@
-// Drum Machine for Daisy Pod with Drum-Set Switching via Big Encoder
-//
-// Knob 1  → Tempo (BPM 60–180)
-// Knob 2  → Master Volume (0.0–1.0)
-// Button 1→ Kick drum (current drum set's kick)
-// Button 2→ Snare drum (current drum set's snare)
-// Encoder (big knob) rotation & push → Switch between drum sets
-//
-// This example assumes the DaisyPod API exposes:
-//   KNOB_0, KNOB_1, KNOB_LAST   (where KNOB_LAST is the big encoder's index)
-//   BUTTON_0, BUTTON_1, BUTTON_LAST (BUTTON_LAST is the encoder-push button)
-//
-// Each time you press the encoder (BUTTON_LAST), it steps to the next drum set.
-// You can define as many drum sets as you like; here we show two sets for illustration.
-
 #include "daisy_pod.h"
 #include "daisysp.h"
 
@@ -25,18 +10,18 @@ static float sampleRate;
 //— DSP objects —//
 // Kick drum: sine oscillator + percussive envelope
 static Oscillator    kickOsc;
-static Adsr         kickEnv;
+static Adsr          kickEnv;
 
 // Snare drum: white noise → bandpass filter + percussive envelope
 static WhiteNoise    snareNoise;
-static Adsr         snareEnv;
+static Adsr          snareEnv;
 static Svf           snareFilter;
 
-// Metronome click: high-freq sine + very short envelope
+// Metronome click: high-frequency sine + very short envelope
 static Oscillator    clickOsc;
-static Adsr         clickEnv;
+static Adsr          clickEnv;
 
-//Hi-hat// ———— 改为 Hi-Hat：
+// Hi-Hat: white noise → highpass filter + percussive envelope
 static WhiteNoise    hiHatNoise;
 static Adsr          hiHatEnv;
 static Svf           hiHatFilter;
@@ -80,82 +65,62 @@ static const uint8_t drumSetColors[NUM_DRUM_SETS][3] = {
 //   [set][2] = snare filter center-freq (Hz)
 //   [set][3] = snare decay time (sec)
 static const float drumParams[NUM_DRUM_SETS][4] = {
-    // Set 0: "Classic" drum set
-    {  60.0f, 0.20f, 1800.0f, 0.15f },
-
-    // Set 1: "Electronic" drum set
-    {  80.0f, 0.12f, 1200.0f, 0.10f },
-
-    // Set 2: "808 Style" (inspired by TR-808)
-    // Characteristics: Deep and powerful kick with longer decay; crisp snare with shorter decay
-    {  45.0f, 0.80f, 2200.0f, 0.10f },
-
-    // Set 3: "Rock Kit" (more punchy and acoustic)
-    // Characteristics: Solid kick; bright and punchy snare
-    {  55.0f, 0.28f, 2500.0f, 0.18f },
-
-    // Set 4: "Lo-Fi HipHop" (soft, slightly retro)
-    // Characteristics: Kick with slightly higher frequency and short decay; 
-    // Snare with lower frequency for a "warmer" or "muffled" sound
-    {  70.0f, 0.15f, 1000.0f, 0.09f },
-
-    // Set 5: "Industrial" (hard, aggressive)
-    // Characteristics: Very short and powerful kick; 
-    // High-frequency snare with harsh noise characteristics
-    {  65.0f, 0.10f, 3500.0f, 0.12f }
+    {  60.0f, 0.20f, 1800.0f, 0.15f },  // Classic
+    {  80.0f, 0.12f, 1200.0f, 0.10f },  // Electronic
+    {  45.0f, 0.80f, 2200.0f, 0.10f },  // 808 Style
+    {  55.0f, 0.28f, 2500.0f, 0.18f },  // Rock Kit
+    {  70.0f, 0.15f, 1000.0f, 0.09f },  // Lo-Fi HipHop
+    {  65.0f, 0.10f, 3500.0f, 0.12f }   // Industrial
 };
 
 // Map a normalized knob [0,1] to BPM in [60,180]
-static inline float KnobToBPM(float k) { return 60.0f + (180.0f - 60.0f) * k; }
-// Map a normalized knob [0,1] to volume [0, 1]
+static inline float KnobToBPM(float k)    { return 60.0f + (180.0f - 60.0f) * k; }
+// Map a normalized knob [0,1] to volume [0,1]
 static inline float KnobToVolume(float k) { return k; }
 
-
-// ==================== 全局新增（放在 currentDrumSet 定义之后） ====================
-static bool  presetMode        = false;
-static bool  presetPlaying     = false;
-static int   presetStep        = 0;
-static float subdivCounter     = 0.0f;
+// ==================== Global additions (placed after currentDrumSet definition) ====================
+static bool  presetMode            = false;
+static bool  presetPlaying         = false;
+static int   presetStep            = 0;
+static float subdivCounter         = 0.0f;
 static float subdivIntervalSamples = 0.0f;
 
-// ———— 将 PRESET_STEPS 从 8 改为 32 ————
+// Change PRESET_STEPS from 8 to 64
 constexpr int PRESET_STEPS = 64;
 
-// ——— 四小节共 64 步的预设节奏 ——//
-// B 行：Bass drum （Kick），在需要的地方连击就在相邻两个 16th 步都设为 1
+// Four bars of 64-step preset rhythm
+// B row: Bass drum (kick)
 static const uint8_t presetBass[PRESET_STEPS] = {
     // bar1 (16 steps)
-    1,0,1,0,  0,0,0,0,  0,0,1,1,  0,0,0,0,
+    1,0,1,0, 0,0,0,0, 0,0,1,1, 0,0,0,0,
     // bar2
-    1,0,1,0,  0,0,0,0,  0,0,1,1,  0,0,0,0,
+    1,0,1,0, 0,0,0,0, 0,0,1,1, 0,0,0,0,
     // bar3
-    1,0,1,0,  0,0,0,0,  0,0,1,0,  0,0,0,0,
+    1,0,1,0, 0,0,0,0, 0,0,1,0, 0,0,0,0,
     // bar4
-    0,0,1,1,  0,0,0,0,  0,0,1,0,  0,0,0,0
+    0,0,1,1, 0,0,0,0, 0,0,1,0, 0,0,0,0
 };
 
-// S 行：Snare（保留原 8 分节奏，在偶数索引上重复一次）
+// S row: Snare (retain original eighth-note rhythm, repeat on even indices)
 static const uint8_t presetSnare[PRESET_STEPS] = {
     // bar1
-    0,0,0,0,  1,0,0,1,  0,1,0,0,  1,0,0,1,
+    0,0,0,0, 1,0,0,1, 0,1,0,0, 1,0,0,1,
     // bar2
-    0,0,0,0,  1,0,0,1,  0,1,0,0,  1,0,0,1,
+    0,0,0,0, 1,0,0,1, 0,1,0,0, 1,0,0,1,
     // bar3
-    0,0,0,0,  1,0,0,1,  0,1,0,0,  0,0,1,0,
+    0,0,0,0, 1,0,0,1, 0,1,0,0, 0,0,1,0,
     // bar4
-    0,1,0,0,  1,0,0,1,  0,1,0,0,  0,0,1,0
+    0,1,0,0, 1,0,0,1, 0,1,0,0, 0,0,1,0
 };
 
-// R 行：Hi-Hat（原来每 8th note 打一次，现在在每对 16th note 上都打）
+// R row: Hi-Hat (originally hit every 8th note, now hit on each pair of 16th notes)
 static const uint8_t presetClick[PRESET_STEPS] = {
-    // bar1–4：每两个 16th 都打一次
-    1,0,1,0,  1,0,1,0,  1,0,1,0,  1,0,1,0,
-    1,0,1,0,  1,0,1,0,  1,0,1,0,  1,0,1,0,
-    1,0,1,0,  1,0,1,0,  1,0,1,0,  1,0,1,0,
-    1,0,1,0,  1,0,1,0,  1,0,0,0,  1,0,1,0
+    // bar1–4: hit every two 16th notes
+    1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0,
+    1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0,
+    1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0,
+    1,0,1,0, 1,0,1,0, 1,0,0,0, 1,0,1,0
 };
-
-
 
 void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)
 {
@@ -186,7 +151,7 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         }
         clkSample = clickOsc.Process() * clickEnv.Process(false);
 
-        // —— 改为：生成 Hi-Hat —— 
+        // Generate Hi-Hat noise sample
         float noiseSample = hiHatNoise.Process();
         hiHatFilter.Process(noiseSample);
         float hHatSample = hiHatFilter.High() * hiHatEnv.Process(false);
@@ -195,27 +160,26 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         int32_t encoderIncrement = pod.encoder.Increment();
         if (encoderIncrement != 0)
         {
-            // On encoder rotation: advance to next/previous set
             currentDrumSet = (currentDrumSet + encoderIncrement + NUM_DRUM_SETS) % NUM_DRUM_SETS;
-            // Apply new parameters immediately:
-            kickOsc.SetFreq(     drumParams[currentDrumSet][0] );
-            kickEnv.SetDecayTime( drumParams[currentDrumSet][1] );
-            snareFilter.SetFreq( drumParams[currentDrumSet][2] );
+            // Apply new parameters immediately
+            kickOsc.SetFreq(       drumParams[currentDrumSet][0] );
+            kickEnv.SetDecayTime(  drumParams[currentDrumSet][1] );
+            snareFilter.SetFreq(   drumParams[currentDrumSet][2] );
             snareEnv.SetDecayTime( drumParams[currentDrumSet][3] );
-            hiHatFilter.SetFreq( hiHatParams[currentDrumSet][0] );
+            hiHatFilter.SetFreq(   hiHatParams[currentDrumSet][0] );
             hiHatEnv.SetDecayTime( hiHatParams[currentDrumSet][1] );
-            
+
             // Update LED color for the current drum set
             pod.led1.Set(drumSetColors[currentDrumSet][0] / 255.0f,
-                        drumSetColors[currentDrumSet][1] / 255.0f,
-                        drumSetColors[currentDrumSet][2] / 255.0f);
+                         drumSetColors[currentDrumSet][1] / 255.0f,
+                         drumSetColors[currentDrumSet][2] / 255.0f);
             pod.led1.Update();
         }
 
-        // 重新计算 1/8 音符的样本间隔
+        // Recalculate sample interval for 1/8 note
         subdivIntervalSamples = beatIntervalSamples * 0.25f;
 
-        // —— 新：1/8 拆分计时 —— 
+        // New: 1/8 subdivision timing
         subdivCounter += 1.0f;
         bool newSubdivision = false;
         if (subdivCounter >= subdivIntervalSamples)
@@ -224,35 +188,34 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
             newSubdivision = true;
         }
 
-        // —— 新：检测 Encoder 按下边沿 —— 
+        // New: detect encoder button rising edge
         bool thisEncoderBtn = pod.encoder.Pressed();
         if (thisEncoderBtn && !lastEncoderButton)
         {
-            presetMode = !presetMode;  // 切换模式
-            // 可选：用不同颜色提示
+            presetMode = !presetMode;  // Toggle preset mode
+            // Optional: indicate with LED color
             if (presetMode)
-                pod.led1.Set(1.0f, 1.0f, 1.0f);  // 白灯表示预设
+                pod.led1.Set(1.0f, 1.0f, 1.0f);  // White for preset mode
             else
-                pod.led1.Set( drumSetColors[currentDrumSet][0]/255.0f,
-                              drumSetColors[currentDrumSet][1]/255.0f,
-                              drumSetColors[currentDrumSet][2]/255.0f );
+                pod.led1.Set(drumSetColors[currentDrumSet][0] / 255.0f,
+                             drumSetColors[currentDrumSet][1] / 255.0f,
+                             drumSetColors[currentDrumSet][2] / 255.0f);
             pod.led1.Update();
         }
         lastEncoderButton = thisEncoderBtn;
 
-        // —— 新：处理预设模式下的按钮 —— 
+        // New: handle buttons in preset mode
         bool thisKickBtn  = pod.button1.Pressed();
         bool thisSnareBtn = pod.button2.Pressed();
 
         if (!presetMode)
         {
-            // 手动模式，保持原有逻辑
             if (thisKickBtn  && !lastButtonKick)  kickEnv.Retrigger(false);
             if (thisSnareBtn && !lastButtonSnare) snareEnv.Retrigger(false);
         }
         else
         {
-            // 预设模式：单击 Kick 启动节奏播放
+            // Preset mode: single click on Kick starts playback
             if (thisKickBtn && !lastButtonKick && !presetPlaying)
             {
                 presetPlaying = true;
@@ -263,52 +226,52 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         lastButtonKick  = thisKickBtn;
         lastButtonSnare = thisSnareBtn;
 
-        // —— 新：在预设播放中，每到 1/8 拍触发对应鼓声 —— 
+        // New: trigger drum voices on each 1/8 subdivision in preset playback
         if (presetMode && presetPlaying && newSubdivision)
         {
             if (presetBass[presetStep])  kickEnv.Retrigger(false);
             if (presetSnare[presetStep]) snareEnv.Retrigger(false);
-            // if (presetClick[presetStep]) clickEnv.Retrigger(false);
             if (presetClick[presetStep]) hiHatEnv.Retrigger(false);
 
-            // 播完 32 步后退出
+            // Exit after playing 64 steps
             presetStep++;
-            if(presetStep >= PRESET_STEPS)
+            if (presetStep >= PRESET_STEPS)
             {
                 presetPlaying = false;
-                // （可选）恢复当前套鼓的 LED
-                pod.led1.Set( drumSetColors[currentDrumSet][0]/255.0f,
-                            drumSetColors[currentDrumSet][1]/255.0f,
-                            drumSetColors[currentDrumSet][2]/255.0f );
+                // (Optional) restore current drum set LED
+                pod.led1.Set(drumSetColors[currentDrumSet][0] / 255.0f,
+                             drumSetColors[currentDrumSet][1] / 255.0f,
+                             drumSetColors[currentDrumSet][2] / 255.0f);
                 pod.led1.Update();
             }
-
         }
-
 
         // 5) Generate kick sample
         float k = kickOsc.Process() * kickEnv.Process(false) * 2.0f;
 
         // 6) Generate snare sample
-        float noise    = snareNoise.Process();
+        float noise   = snareNoise.Process();
         snareFilter.Process(noise);
-        float filtered = snareFilter.Band();  // Use bandpass output
-        float s        = filtered * snareEnv.Process(false);
+        float filtered = snareFilter.Band();
+        float s       = filtered * snareEnv.Process(false);
 
-        // 7) Mix kick + snare + click, apply volume
+        // 7) Mix kick + snare + click (and hi-hat in preset mode), apply volume
         float outSample;
         if (!presetMode)
         {
-            // 普通模式：使用 metronome
             outSample = (k + s + clkSample) * volume;
         }
         else
         {
-            // 预设模式：同时使用 metronome 和 hi-hat
             outSample = (k + s + clkSample + hHatSample) * volume;
         }
-        out[0][i] = outSample;
-        out[1][i] = outSample;
+
+        // Mix generated audio with input pass-through
+        float inputL = in[0][i];
+        float inputR = in[1][i];
+
+        out[0][i] = outSample + inputL;
+        out[1][i] = outSample + inputR;
     }
 }
 
@@ -323,45 +286,44 @@ int main(void)
                  drumSetColors[0][2] / 255.0f);
     pod.led1.Update();
 
-    // --- Initialize encoder state, but no additional setup needed for rotation here ---
+    // Initialize encoder button state
     lastEncoderButton = pod.encoder.Pressed();
 
-    // --- Kick drum initial setup (use parameters from set 0) ---
+    // Kick drum initial setup (parameters from set 0)
     kickOsc.Init(sampleRate);
     kickOsc.SetWaveform(Oscillator::WAVE_SIN);
-    kickOsc.SetFreq(     drumParams[0][0] );
+    kickOsc.SetFreq(       drumParams[0][0] );
     kickEnv.Init(sampleRate);
-    kickEnv.SetAttackTime( 0.001f );   // 1 ms attack
-    kickEnv.SetDecayTime( drumParams[0][1] );
+    kickEnv.SetAttackTime( 0.001f );  // 1 ms attack
+    kickEnv.SetDecayTime(  drumParams[0][1] );
     kickEnv.SetSustainLevel(0.0f);
 
-    // --- Snare drum initial setup (use parameters from set 0) ---
+    // Snare drum initial setup (parameters from set 0)
     snareNoise.Init();
     snareEnv.Init(sampleRate);
-    snareEnv.SetAttackTime( 0.001f );   // 1 ms attack
-    snareEnv.SetDecayTime( drumParams[0][3] );
+    snareEnv.SetAttackTime( 0.001f );  // 1 ms attack
+    snareEnv.SetDecayTime(  drumParams[0][3] );
     snareEnv.SetSustainLevel(0.0f);
     snareFilter.Init(sampleRate);
     snareFilter.SetFreq( drumParams[0][2] );
     snareFilter.SetRes(  0.7f );
 
-    // --- Metronome click setup ---
+    // Metronome click setup
     clickOsc.Init(sampleRate);
     clickOsc.SetWaveform(Oscillator::WAVE_SIN);
-    clickOsc.SetFreq( 1000.0f );    // 1 kHz click
+    clickOsc.SetFreq( 1000.0f );       // 1 kHz click
     clickEnv.Init(sampleRate);
-    clickEnv.SetAttackTime(  0.0005f ); // 0.5 ms attack
-    clickEnv.SetDecayTime(  0.01f );   // 10 ms decay
+    clickEnv.SetAttackTime(  0.0005f );// 0.5 ms attack
+    clickEnv.SetDecayTime(   0.01f );  // 10 ms decay
     clickEnv.SetSustainLevel(0.0f);
 
-    // --- Hi-Hat initial setup ————
+    // Hi-Hat initial setup
     hiHatNoise.Init();
     hiHatEnv.Init(sampleRate);
-    hiHatEnv.SetAttackTime(0.001f);   // 1 ms
-    hiHatEnv.SetDecayTime(0.05f);     // 短衰减
+    hiHatEnv.SetAttackTime(0.001f);    // 1 ms attack
+    hiHatEnv.SetDecayTime(0.05f);      // Short decay
     hiHatEnv.SetSustainLevel(0.0f);
     hiHatFilter.Init(sampleRate);
-    // 用高通滤波器保留高频部分
     hiHatFilter.SetFreq(8000.0f);
     hiHatFilter.SetRes(0.7f);
 
