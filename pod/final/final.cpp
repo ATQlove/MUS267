@@ -119,25 +119,40 @@ static float subdivCounter     = 0.0f;
 static float subdivIntervalSamples = 0.0f;
 
 // ———— 将 PRESET_STEPS 从 8 改为 32 ————
-constexpr int PRESET_STEPS = 32;
+constexpr int PRESET_STEPS = 64;
 
-// ———— 四小节共 32 步的预设节奏 ——//
-// B 行：Bass drum （Kick）
+// ——— 四小节共 64 步的预设节奏 ——//
+// B 行：Bass drum （Kick），在需要的地方连击就在相邻两个 16th 步都设为 1
 static const uint8_t presetBass[PRESET_STEPS] = {
-    // bar1            bar2            bar3            bar4
-    1,1,0,0,0,0,1,0,  1,1,0,0,0,0,1,0,  1,1,0,0,0,1,0,0,  0,1,0,0,0,1,0,0
+    // bar1 (16 steps)
+    1,0,1,0,  0,0,0,0,  0,0,1,1,  0,0,0,0,
+    // bar2
+    1,0,1,0,  0,0,0,0,  0,0,1,1,  0,0,0,0,
+    // bar3
+    1,0,1,0,  0,0,0,0,  0,0,1,0,  0,0,0,0,
+    // bar4
+    0,0,1,1,  0,0,0,0,  0,0,1,0,  0,0,0,0
 };
 
-// S 行：Snare
+// S 行：Snare（保留原 8 分节奏，在偶数索引上重复一次）
 static const uint8_t presetSnare[PRESET_STEPS] = {
-    // bar1            bar2            bar3            bar4
-    0,0,1,1,0,1,1,0,  0,0,1,1,0,1,1,0,  0,0,1,1,0,0,0,1,  0,1,1,0,1,1,0,1
+    // bar1
+    0,0,0,0,  1,0,0,1,  0,1,0,0,  1,0,0,1,
+    // bar2
+    0,0,0,0,  1,0,0,1,  0,1,0,0,  1,0,0,1,
+    // bar3
+    0,0,0,0,  1,0,0,1,  0,1,0,0,  0,0,1,0,
+    // bar4
+    0,1,0,0,  1,0,0,1,  0,1,0,0,  0,0,1,0
 };
 
-// R 行：Ride/Hi-Hat
+// R 行：Hi-Hat（原来每 8th note 打一次，现在在每对 16th note 上都打）
 static const uint8_t presetClick[PRESET_STEPS] = {
-    // bar1            bar2            bar3            bar4
-    1,1,1,1,1,1,1,1,  1,1,1,1,1,1,1,1,  1,1,1,1,1,1,1,1,  1,1,1,1,0,1,1,0
+    // bar1–4：每两个 16th 都打一次
+    1,0,1,0,  1,0,1,0,  1,0,1,0,  1,0,1,0,
+    1,0,1,0,  1,0,1,0,  1,0,1,0,  1,0,1,0,
+    1,0,1,0,  1,0,1,0,  1,0,1,0,  1,0,1,0,
+    1,0,1,0,  1,0,1,0,  1,0,0,0,  1,0,1,0
 };
 
 
@@ -198,7 +213,7 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         }
 
         // 重新计算 1/8 音符的样本间隔
-        subdivIntervalSamples = beatIntervalSamples * 0.5f;
+        subdivIntervalSamples = beatIntervalSamples * 0.25f;
 
         // —— 新：1/8 拆分计时 —— 
         subdivCounter += 1.0f;
@@ -272,7 +287,7 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
 
 
         // 5) Generate kick sample
-        float k = kickOsc.Process() * kickEnv.Process(false) * 2.5f;
+        float k = kickOsc.Process() * kickEnv.Process(false) * 2.0f;
 
         // 6) Generate snare sample
         float noise    = snareNoise.Process();
