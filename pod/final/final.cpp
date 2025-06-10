@@ -78,14 +78,13 @@ static inline float KnobToBPM(float k)    { return 60.0f + (180.0f - 60.0f) * k;
 // Map a normalized knob [0,1] to volume [0,1]
 static inline float KnobToVolume(float k) { return k; }
 
-// ==================== Global additions (placed after currentDrumSet definition) ====================
+// ==================== Global additions ====================
 static bool  presetMode            = false;
 static bool  presetPlaying         = false;
 static int   presetStep            = 0;
 static float subdivCounter         = 0.0f;
 static float subdivIntervalSamples = 0.0f;
 
-// Change PRESET_STEPS from 8 to 64
 constexpr int PRESET_STEPS = 64;
 
 // Four bars of 64-step preset rhythm
@@ -101,7 +100,7 @@ static const uint8_t presetBass[PRESET_STEPS] = {
     0,0,1,1, 0,0,0,0, 0,0,1,0, 0,0,0,0
 };
 
-// S row: Snare (retain original eighth-note rhythm, repeat on even indices)
+// S row: Snare
 static const uint8_t presetSnare[PRESET_STEPS] = {
     // bar1
     0,0,0,0, 1,0,0,1, 0,1,0,0, 1,0,0,1,
@@ -113,7 +112,7 @@ static const uint8_t presetSnare[PRESET_STEPS] = {
     0,1,0,0, 1,0,0,1, 0,1,0,0, 0,0,1,0
 };
 
-// R row: Hi-Hat (originally hit every 8th note, now hit on each pair of 16th notes)
+// R row: Hi-Hat
 static const uint8_t presetClick[PRESET_STEPS] = {
     // bar1–4: hit every two 16th notes
     1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0,
@@ -176,10 +175,10 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
             pod.led1.Update();
         }
 
-        // Recalculate sample interval for 1/8 note
+        // Recalculate sample interval for 1/16 note
         subdivIntervalSamples = beatIntervalSamples * 0.25f;
 
-        // New: 1/8 subdivision timing
+        // New: 1/16 subdivision timing
         subdivCounter += 1.0f;
         bool newSubdivision = false;
         if (subdivCounter >= subdivIntervalSamples)
@@ -193,7 +192,6 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         if (thisEncoderBtn && !lastEncoderButton)
         {
             presetMode = !presetMode;  // Toggle preset mode
-            // Optional: indicate with LED color
             if (presetMode)
                 pod.led1.Set(1.0f, 1.0f, 1.0f);  // White for preset mode
             else
@@ -238,7 +236,6 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
             if (presetStep >= PRESET_STEPS)
             {
                 presetPlaying = false;
-                // (Optional) restore current drum set LED
                 pod.led1.Set(drumSetColors[currentDrumSet][0] / 255.0f,
                              drumSetColors[currentDrumSet][1] / 255.0f,
                              drumSetColors[currentDrumSet][2] / 255.0f);
